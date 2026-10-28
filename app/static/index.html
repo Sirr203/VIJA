@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vija – Vietnamese ⇄ Japanese Translation</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; }
+  .row { display: flex; gap: 8px; margin: 8px 0; }
+  input, select, button { font-size: 16px; padding: 8px; }
+  button { cursor: pointer; }
+  #rec { flex: 1; padding: 14px; font-size: 16px; border-radius: 8px; }
+  #rec.on { background: #e5484d; color: #fff; }
+  #hf { flex: 1; padding: 14px; font-size: 16px; background: #2f855a; color: #fff; border: 1px solid #2f855a; border-radius: 8px; }
+  #hf.on { background: #c53030; border-color: #c53030; }
+  #log { margin: 16px 0; display: flex; flex-direction: column; gap: 8px; }
+  .msg { padding: 8px 12px; border-radius: 10px; max-width: 85%; background: #eee; color: #111; }
+  .msg.mine { align-self: flex-end; background: #d6e8ff; }
+  .msg .main { font-size: 18px; }
+  .msg .sub { font-size: 13px; color: #555; margin-top: 4px; }
+  #status { color: #666; min-height: 1.4em; }
+  .hidden { display: none; }
+</style>
+<script src="/static/handsfree.js"></script>
+</head>
+<body>
+<h2>Vija – Vietnamese ⇄ Japanese</h2>
+
+<div id="join">
+  <div class="row"><input id="pw" type="password" placeholder="Password (if required)"></div>
+  <div class="row">
+    <select id="lang"><option value="vi">I speak Vietnamese (Tiếng Việt)</option><option value="ja">I speak Japanese (日本語)</option></select>
+    <button id="go">Join</button>
+  </div>
+</div>
+
+<div id="room" class="hidden">
+  <div id="presence"></div>
+  <div id="log"></div>
+  <div id="status"></div>
+  <div class="row">
+    <button id="rec">🎤 Push to Talk</button>
+    <button id="hf">🎧 Hands-Free Mode</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let ws, myLang, recorder, chunks = [], stream, recording = false;
+let authed = false;
+let hfActive = false, hfHandle = null;
+let isWaitingTranslation = false;
+
+if (sessionStorage.getItem("vija_pw")) $("pw").value = sessionStorage.getItem("vija_pw");
+if (sessionStorage.getItem("vija_lang")) $("lang").value = sessionStorage.getItem("vija_lang");
+
+let retries = 0, closedByServer = false;
+
+function sendAudio(wav) {
+  if (ws && ws.readyState === WebSocket.OPEN && authed) {
+    ws.send(wav);
+    return true;
+  }
+  console.warn("WebSocket is not ready or hello handshake is pending.");
+  return false;
+}
+
+function pauseCollection() {
+  isWaitingTranslation = true;
+  if (hfActive && hfHandle && hfHandle.pause) hfHandle.pause();
+}
+
+function resumeCollection() {
+  if (!isWaitingTranslation) return;
+  isWaitingTranslation = false;
+  if (hfActive && hfHandle && hfHandle.resume) {
+    hfHandle.resume();
+    $("status").textContent = "Listening continuously (hands-free)...";
+  }
+}
+
+function stopHandsFreeMode() {
+  hfActive = false;
+  isWaitingTranslation = false;
+  if (hfHandle) {
+    try { hfHandle.stop(); } catch (e) {}
+    hfHandle = null;
+  }
+  $("hf").classList.remove("on");
+  $("hf").textContent = "🎧 Hands-Free Mode";
+  $("rec").disabled = false;
+  $("status").textContent = "";
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws?lang=${myLang}`);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "hello", token: $("pw").value }));
+    sessionStorage.setItem("vija_pw", $("pw").value);
+    sessionStorage.setItem("vija_lang", myLang);
+    authed = true;
+    retries = 0;
+    $("rec").disabled = false;
+    $("hf").disabled = false;
+    $("status").textContent = "";
+  };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+  ws.onclose = () => {
+    authed = false;
+    $("rec").disabled = true;
+    $("hf").disabled = true;
+    if (hfActive) stopHandsFreeMode();
+    if (closedByServer || retries >= 5) { $("status").textContent = "Disconnected."; return; }
+    const wait = Math.min(1000 * 2 ** retries++, 10000);
+    $("status").textContent = `Connection lost, reconnecting in ${wait / 1000}s...`;
+    setTimeout(connect, wait);
+  };
+}
+
+$("go").onclick = () => {
+  myLang = $("lang").value;
+  connect();
+  $("join").classList.add("hidden");
+  $("room").classList.remove("hidden");
+};
+
+function handle(m) {
+  if (m.type === "fatal") { closedByServer = true; alert(m.text); location.reload(); }
+  else if (m.type === "presence") {
+    $("presence").textContent = `${m.count}/2 connected`;
+  }
+  else if (m.type === "status") {
+    $("status").textContent = m.text;
+    if (m.text === "Không nghe thấy giọng nói." || m.text === "No speech detected." || m.text === "") {
+      resumeCollection();
+    }
+  }
+  else if (m.type === "error") {
+    $("status").textContent = "⚠ " + m.text;
+    resumeCollection();
+  }
+  else if (m.type === "message") {
+    addMessage(m);
+    resumeCollection();
+  }
+}
+
+function addMessage(m) {
+  const mine = m.speaker === myLang;
+  const box = document.createElement("div");
+  box.className = "msg" + (mine ? " mine" : "");
+  const main = document.createElement("div"), sub = document.createElement("div");
+  main.className = "main"; sub.className = "sub";
+  main.textContent = mine ? m.original : m.translated;
+  sub.textContent = mine ? "→ " + m.translated : "Original: " + m.original;
+  if (mine && m.timings_ms) sub.textContent += `  (⏱ ${(m.timings_ms.total / 1000).toFixed(1)}s)`;
+  box.append(main, sub);
+  $("log").appendChild(box);
+  box.scrollIntoView({ behavior: "smooth" });
+}
+
+$("rec").onclick = async () => {
+  if (hfActive) stopHandsFreeMode();
+  if (!recording) {
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { $("status").textContent = "⚠ Unable to access microphone (HTTPS or localhost required)."; return; }
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      if (chunks.length === 0) return;
+      try {
+        const blob = new Blob(chunks);
+        if (blob.size === 0) return;
+        const wav = await toWav16k(blob);
+        sendAudio(wav);
+      } catch (err) {
+        console.error("Audio processing error:", err);
+        $("status").textContent = "⚠ Microphone audio processing error.";
+      }
+    };
+    recorder.start();
+    recording = true;
+    $("rec").classList.add("on"); $("rec").textContent = "⏹ Stop";
+  } else {
+    recorder.stop();
+    recording = false;
+    $("rec").classList.remove("on"); $("rec").textContent = "🎤 Push to Talk";
+  }
+};
+
+$("hf").onclick = async () => {
+  if (hfActive) {
+    stopHandsFreeMode();
+  } else {
+    if (recording) $("rec").click();
+    try {
+      $("status").textContent = "Activating hands-free microphone...";
+      hfHandle = await startHandsFree({
+        onUtterance: async (utterance, sampleRate) => {
+          if (isWaitingTranslation) return;
+          if (!ws || ws.readyState !== WebSocket.OPEN || !authed) return;
+          pauseCollection();
+          $("status").textContent = "Processing...";
+          try {
+            const downsampled = resample(utterance, sampleRate, 16000);
+            const wav = encodeWav(downsampled, 16000);
+            if (!sendAudio(wav)) {
+              resumeCollection();
+            }
+          } catch (err) {
+            console.error("WAV encoding error:", err);
+            $("status").textContent = "⚠ Audio processing error.";
+            resumeCollection();
+          }
+        },
+        onLevel: (level, speaking) => {
+          if (hfActive && !isWaitingTranslation) {
+            $("status").textContent = speaking ? "Speaking..." : "Listening continuously (hands-free)...";
+          }
+        },
+      });
+      hfActive = true;
+      $("hf").classList.add("on");
+      $("hf").textContent = "⏹ Stop Hands-Free";
+      $("rec").disabled = true;
+      $("status").textContent = "Listening continuously (hands-free)...";
+    } catch (err) {
+      console.error("Unable to start hands-free mode:", err);
+      $("status").textContent = "⚠ Unable to access hands-free mic (HTTPS or localhost required).";
+      stopHandsFreeMode();
+    }
+  }
+};
+
+// Decode browser recording -> mono 16 kHz -> WAV
+async function toWav16k(blob) {
+  const ctx = new AudioContext();
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  await ctx.close();
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+  const src = off.createBufferSource();
+  src.buffer = decoded; src.connect(off.destination); src.start();
+  const rendered = await off.startRendering();
+  return encodeWav(rendered.getChannelData(0), 16000);
+}
+
+function encodeWav(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2), v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); v.setUint32(4, 36 + samples.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, samples.length * 2, true);
+  let o = 44;
+  for (const s of samples) { const x = Math.max(-1, Math.min(1, s)); v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true); o += 2; }
+  return buf;
+}
+</script>
+</body>
+</html>
