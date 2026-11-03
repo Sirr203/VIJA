@@ -13,7 +13,7 @@ BASE_URL = "https://api.groq.com/openai/v1"
 TIMEOUT_S = 20.0
 
 DEFAULT_ASR_MODEL = "whisper-large-v3"
-DEFAULT_MT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MT_MODEL = "openai/gpt-oss-120b"
 DEFAULT_ASR_RPM = 20
 DEFAULT_MT_RPM = 30
 
@@ -31,6 +31,7 @@ class ApiError(Exception):
     def __init__(self, code: int, message: str, retry_after: str | float | None = None):
         super().__init__(f"HTTP {code}: {message}")
         self.code = code
+        self.message = message
         try:
             self.retry_after = float(retry_after) if retry_after is not None else None
         except ValueError:
@@ -126,7 +127,14 @@ class GroqRecognizer(SpeechRecognizer):
             self._limiter.acquire()
             return self.http.post("/audio/transcriptions", data=data, files=files)
 
-        return clean_transcript(with_retry(call))
+        try:
+            return clean_transcript(with_retry(call))
+        except ApiError as exc:
+            if exc.code == 404 and ("model_not_found" in str(exc).lower() or "does not exist" in str(exc).lower()):
+                raise RuntimeError(
+                    f"Model {self.model} không khả dụng, hãy đặt GROQ_ASR_MODEL trong .env"
+                ) from exc
+            raise
 
 
 class GroqTranslator(Translator):
@@ -163,5 +171,14 @@ class GroqTranslator(Translator):
             self._limiter.acquire()
             return self.http.post("/chat/completions", json=body)
 
-        out = with_retry(call)["choices"][0]["message"]["content"]
+        try:
+            res = with_retry(call)
+        except ApiError as exc:
+            if exc.code == 404 and ("model_not_found" in str(exc).lower() or "does not exist" in str(exc).lower()):
+                raise RuntimeError(
+                    f"Model {self.model} không khả dụng, hãy đặt GROQ_MT_MODEL trong .env"
+                ) from exc
+            raise
+
+        out = res["choices"][0]["message"]["content"]
         return re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip()

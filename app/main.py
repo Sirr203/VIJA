@@ -81,7 +81,7 @@ async def healthz():
         getattr(mt_obj, "model", None)
         or os.getenv("GROQ_MT_MODEL")
         or os.getenv("MT_MODEL")
-        or "llama-3.3-70b-versatile"
+        or "openai/gpt-oss-120b"
     )
     mt_fallback = os.getenv("MT_FALLBACK", "none")
 

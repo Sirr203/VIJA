@@ -90,6 +90,13 @@ class TranslatorTests(unittest.TestCase):
         GroqTranslator(http=http, model="openai/gpt-oss-120b").translate("a", "Vietnamese", "Japanese")
         self.assertEqual(http.calls[0][1]["json"]["reasoning_effort"], "low")
 
+    def test_default_model_is_gpt_oss_with_low_reasoning(self):
+        http = FakeHTTP(self.reply("ok"))
+        translator = GroqTranslator(http=http)
+        self.assertEqual(translator.model, "openai/gpt-oss-120b")
+        translator.translate("a", "Vietnamese", "Japanese")
+        self.assertEqual(http.calls[0][1]["json"]["reasoning_effort"], "low")
+
     def test_passes_tone_to_prompt(self):
         http = FakeHTTP(self.reply("こんにちは"))
         translator = GroqTranslator(http=http, tone="polite")
@@ -118,6 +125,41 @@ class RetryAfterTests(unittest.TestCase):
 
     def test_bad_retry_after_is_ignored(self):
         self.assertIsNone(ApiError(429, "x", retry_after="abc").retry_after)
+
+
+class ModelErrorHandlingTests(unittest.TestCase):
+    class ErrorHTTP:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def post(self, path, **kw):
+            raise self.exc
+
+    def test_mt_404_model_not_found_raises_helpful_error(self):
+        exc = ApiError(
+            404,
+            '{"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}'
+        )
+        translator = GroqTranslator(http=self.ErrorHTTP(exc), model="llama-3.3-70b-versatile")
+        with self.assertRaises(RuntimeError) as cm:
+            translator.translate("xin chào", "Vietnamese", "Japanese")
+        self.assertEqual(str(cm.exception), "Model llama-3.3-70b-versatile không khả dụng, hãy đặt GROQ_MT_MODEL trong .env")
+
+    def test_asr_404_model_not_found_raises_helpful_error(self):
+        exc = ApiError(
+            404,
+            '{"error":{"message":"The model `whisper-invalid` does not exist","type":"invalid_request_error","code":"model_not_found"}}'
+        )
+        recognizer = GroqRecognizer(http=self.ErrorHTTP(exc), model="whisper-invalid")
+        with self.assertRaises(RuntimeError) as cm:
+            recognizer.transcribe(b"RIFF", "audio/wav", "Vietnamese")
+        self.assertEqual(str(cm.exception), "Model whisper-invalid không khả dụng, hãy đặt GROQ_ASR_MODEL trong .env")
+
+    def test_non_404_api_error_is_raised_as_is(self):
+        exc = ApiError(400, "Bad Request")
+        translator = GroqTranslator(http=self.ErrorHTTP(exc))
+        with self.assertRaises(ApiError):
+            translator.translate("xin chào", "Vietnamese", "Japanese")
 
 
 if __name__ == "__main__":

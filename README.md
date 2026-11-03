@@ -49,6 +49,8 @@ flowchart LR
 | `GEMINI_API_KEY` | *(Optional)* | Google Gemini API key (optional when using Gemini provider) |
 | `ASR_PROVIDER` | `groq` | Speech recognition provider (`groq` / `gemini`) |
 | `MT_PROVIDER` | `groq` | Translation provider (`groq` / `gemini`) |
+| `GROQ_MT_MODEL` | `openai/gpt-oss-120b` | Translation model on Groq |
+| `GROQ_ASR_MODEL` | `whisper-large-v3` | Speech recognition model on Groq |
 | `MT_FALLBACK` | `none` | Fallback translator if primary service fails or times out (`none` / `groq` / `gemini`) |
 | `TONE` | `auto` | Translation tone: `auto` (preserves original nuance), `polite` (polite style, です/ます), `casual` (informal style) |
 | `ACCESS_PASSWORD` | *(Empty)* | Room access password; logs a warning on startup if left empty |
