@@ -1,3 +1,8 @@
 :80 {
-    reverse_proxy vija:8000
-}
+       handle /healthz {
+           respond 404
+       }
+       handle {
+           reverse_proxy vija:8000
+       }
+   }
