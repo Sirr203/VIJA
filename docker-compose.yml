@@ -1,7 +1,18 @@
 services:
   vija:
     build: .
-    ports:
-      - "8000:8000"
     env_file: .env
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "8080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      vija:
+        condition: service_healthy
     restart: unless-stopped
