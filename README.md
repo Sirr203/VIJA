@@ -41,6 +41,27 @@ flowchart LR
 
 ---
 
+## Run with Docker
+
+**Option 1: pull the prebuilt image (no Python needed)**
+
+```bash
+cp .env.example .env        # then fill in GROQ_API_KEY and ACCESS_PASSWORD
+docker run --env-file .env -p 8000:8000 ghcr.io/sirr203/vija:0.1.0
+```
+Open `http://localhost:8000`.
+
+**Option 2: Docker Compose (Vija + Caddy reverse proxy + Cloudflare quick tunnel)**
+
+```bash
+cp .env.example .env        # set GROQ_API_KEY, ACCESS_PASSWORD, TRUST_PROXY=1
+docker compose up -d
+docker compose logs cloudflared | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
+```
+The last command prints a temporary public HTTPS URL (it changes on every restart). Caddy is also reachable locally at `http://localhost:8080`. Stop everything with `docker compose down`.
+
+The container runs as a non-root user and has a healthcheck on `/healthz`; Caddy blocks `/healthz` from outside.
+
 ## Configuration Reference (.env)
 
 | Environment Variable | Default | Description |
