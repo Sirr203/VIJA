@@ -47,7 +47,7 @@ flowchart LR
 
 ```bash
 cp .env.example .env        # then fill in GROQ_API_KEY and ACCESS_PASSWORD
-docker run --env-file .env -p 8000:8000 ghcr.io/sirr203/vija:0.1.0
+docker run --env-file .env -p 8000:8000 ghcr.io/sirr203/vija:v0.1.0
 ```
 Open `http://localhost:8000`.
 
